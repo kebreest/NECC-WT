@@ -1,0 +1,30 @@
+---
+title: "Demographic and Economic Benchmarks"
+author: "Kassie Breest, Max Williams"
+date: "2024-08-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Read in Packages
+
+```{r}
+
+```
+
+#Import Data
+
+##ACS
+
+```{r}
+
+```
+
+##BLS
+```{r}
+
+```
+
