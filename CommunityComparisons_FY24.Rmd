@@ -1,0 +1,785 @@
+---
+title: "Community Comparisons FY24"
+author: "Melissa, Barbara Talagan"
+date: "2023-08-21"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+#Load packages
+
+```{r message=FALSE, warning=FALSE}
+# For Census Data
+library(tidycensus)
+library(tidyverse)
+library(foreign)
+library(openxlsx)
+library(writexl)
+library(flextable)
+library(officer)
+library(readr)
+library(readxl)
+library(purrr)
+library(janitor)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(tools)
+library(stringr)
+library(extrafont)
+
+
+```
+#ACS
+##Pull data 
+Need town level data for ACS 5YR 2017-2021, 9 states (ME, NH,
+VT, MA, CT, RI, NY, PA, NJ)
+
+ACS variables to pull: 
+- population: TOTAL POPULATION = B01003 
+- median household income: HOUSEHOLD INCOME IN THE PAST 12 MONTHS (IN 2021 INFLATION-ADJUSTED DOLLARS) = B19013 
+- percent of pop over 25 with only bachelor's degree: EDUCATIONAL ATTAINMENT = S1501 
+- percent of pop, black: RACE = B02001 
+- percent of pop, hispanic: HISPANIC OR LATINO ORIGIN = B03003 
+- percent of pop below poverty: POVERTY STATUS IN THE PAST 12 MONTHS = S1701 
+- working age pop (percent of pop between 16-64): AGE AND SEX = S0101
+
+##Setting up variables and geographies
+
+```{r}
+towns <- "County Subdivision"
+years <- 2021
+outputs <- "tidy"
+#states <- c(09, 25, 23, 33, 34, 36, 44, 50, 42)
+states <- c(09,25,33,36)
+tables <- c("B01003", "B19013", "S1501", "B02001", "B03003", "S1701", "S0101")
+```
+
+```{r}
+study_comm <- read_excel("StudyCommunities.xlsx")
+
+study_comm <- study_comm %>%
+  rename(GEOID = GeoID)
+
+```
+
+
+##Create one df for each table pulled
+
+```{r}
+#TOTAL POPULATION
+studytowns_pop <- get_acs(
+  geography = towns,
+  state = states,
+  table = "B01003",
+  year = years,
+  geometry = FALSE,
+  output = outputs,
+  cache_table = TRUE
+)
+
+studytowns_pop <- left_join(study_comm, studytowns_pop, by = "GEOID")
+
+
+#HOUSEHOLD INCOME
+studytowns_HHinc <- get_acs(
+  geography = towns,
+  state = states,
+  table = "B19013",
+  year = years,
+  geometry = FALSE,
+  output = outputs,
+  cache_table = TRUE
+)
+
+studytowns_HHinc <- left_join(study_comm, studytowns_HHinc, by = "GEOID")
+
+#EDUCATIONAL ATTAINMENT
+studytowns_edu <- get_acs(
+  geography = towns,
+  state = states,
+  table = "S1501",
+  year = years,
+  geometry = FALSE,
+  output = outputs,
+  cache_table = TRUE
+)
+
+studytowns_edu <- left_join(study_comm, studytowns_edu, by = "GEOID")
+
+#RACE
+studytowns_race <- get_acs(
+  geography = towns,
+  state = states,
+  table = "B02001",
+  year = years,
+  geometry = FALSE,
+  output = outputs,
+  cache_table = TRUE
+)
+
+studytowns_race <- left_join(study_comm, studytowns_race, by = "GEOID")
+
+#HISPANIC OR LATINO ORIGIN
+studytowns_hispanic <- get_acs(
+  geography = towns,
+  state = states,
+  table = "B03003",
+  year = years,
+  geometry = FALSE,
+  output = outputs,
+  cache_table = TRUE
+)
+
+studytowns_hispanic <- left_join(study_comm, studytowns_hispanic, by = "GEOID")
+
+#POVERTY STATUS
+studytowns_povertystat <- get_acs(
+  geography = towns,
+  state = states,
+  table = "S1701",
+  year = years,
+  geometry = FALSE,
+  output = outputs,
+  cache_table = TRUE
+)
+
+studytowns_povertystat <- left_join(study_comm, studytowns_povertystat, by = "GEOID")
+
+#AGE AND SEX
+studytowns_agesex <- get_acs(
+  geography = towns,
+  state = states,
+  table = "S0101",
+  year = years,
+  geometry = FALSE,
+  output = outputs,
+  cache_table = TRUE
+)
+
+studytowns_agesex <- left_join(study_comm, studytowns_agesex, by = "GEOID")
+```
+
+
+## Investigate the data to plan for cleaning
+
+```{r}
+varnames_subject <- load_variables(2017, "acs5/subject") #looking for 2017-2021 variables
+View(varnames_subject)
+
+varnames_detailed <- load_variables(2017, "acs5")
+View(varnames_detailed)
+```
+
+## Clean data
+###1. Population
+
+```{r}
+fortable_pop <- studytowns_pop %>%
+  select(place, comm_type, state, GEOID, estimate) %>%
+  rename(pop_1 = estimate)%>%
+  distinct(place, .keep_all = TRUE)
+
+```
+
+
+
+###2. Percent of Pop. over 25 with only a BS
+```{r}
+#Edu. Attain College as % of pop 25 and over or Percent BS only
+
+#POP 25 AND OVER
+studytowns_pop25 <- studytowns_agesex %>%
+  filter(variable %in% c(
+    "S0101_C01_008", "S0101_C01_009", "S0101_C01_010", "S0101_C01_011",
+    "S0101_C01_012", "S0101_C01_013", "S0101_C01_014", "S0101_C01_015",
+    "S0101_C01_016", "S0101_C01_017", "S0101_C01_018", "S0101_C01_019"
+  )) %>% #filter for all age groups over 25
+  group_by(GEOID, place, comm_type, state) %>%
+  summarize(pop25 = sum(estimate)) #sum each age group count by community to get the total pop over 25
+  
+
+#POP WITH A BS
+#Look at the varnames dataframe, filter for "S1501" and scroll through until you locate the variable for "Estimate of Total Population 25 years and over with a Bachelor's degree". The variable you want is "S1501_C01_012", so filter the dataframe for that variable and now you'll have what we need
+
+fortable_pctbsonly <- studytowns_edu %>%
+  filter(variable == "S1501_C01_012") %>%  #filter for only the estimates of pop 25 yrs and over with a BS
+  rename(popwithBS = estimate) #renamed this variable to avoid confusion
+
+fortable_pctbsonly<- left_join(fortable_pctbsonly, studytowns_pop25, by = "GEOID") %>% #add in the total pop variable
+  select(place.x, comm_type.x, state.x, GEOID, pop25, popwithBS) %>%
+  rename(state = state.x,
+         place = place.x,
+         comm_type = comm_type.x) %>%
+  mutate(pctbs_2 = (popwithBS/pop25)*100)%>%
+  distinct(place, .keep_all = TRUE) #calculate % of pop that have a BS
+
+```
+
+###3. Median Household Income
+```{r}  
+#Median Household Income 
+fortable_medianHHinc <- studytowns_HHinc %>%
+  filter(variable == "B19013_001") %>%  #filter for overall median household income
+  rename(medianHHinc_3 = estimate) %>% #renamed this variable to avoid confusion
+  select(place, comm_type, state, GEOID, medianHHinc_3) %>% #select only the necessary variables for the table
+  distinct(place, .keep_all = TRUE) 
+
+```
+
+
+###4. Percent of Pop. that is Black
+```{r}
+#Percent of population that is black
+studytowns_pctblack <- studytowns_race %>%
+  filter(variable == "B02001_003") %>% #filter for only black population
+  rename(popblack = estimate) #renamed this variable to avoid confusion
+
+fortable_pctblack <- left_join(studytowns_pctblack, fortable_pop, by = "GEOID") %>% #add in the total pop variable
+  select(place.x, comm_type.x, state.x, GEOID, pop_1, popblack) %>%
+  rename(state = state.x,
+         place = place.x,
+         comm_type = comm_type.x) %>%
+  mutate(pctblack_4 = (popblack/pop_1)*100)%>%#calculate % of pop that is black
+  distinct(place, .keep_all = TRUE) 
+
+```
+
+###5. Percent of Pop. that is Hispanic
+```{r}
+#Percent of population that is hispanic/latino
+studytowns_pcthispanic <- studytowns_hispanic %>%
+  filter(variable == "B03003_003") %>% #filter for only hispanic/latino population
+  rename(pophispanic = estimate) #renamed this variable to avoid confusion
+
+fortable_pcthispanic <- left_join(studytowns_pcthispanic, fortable_pop, by = "GEOID")%>% #add in the total pop variable
+  select(place.x, comm_type.x, state.x, GEOID, pop_1, pophispanic) %>%
+  rename(state = state.x,
+         place = place.x,
+         comm_type = comm_type.x) %>%
+    mutate(pcthispanic_5 = (pophispanic/pop_1)*100) %>% #calculate % of pop that is hispanic/latino
+  distinct(place, .keep_all = TRUE) 
+
+```
+
+###6. Percent of Pop. below Poverty
+```{r}
+#Percent of population in poverty
+studytowns_pctpoverty <- studytowns_povertystat %>%
+  filter(variable == "S1701_C02_001") %>% #filter for total population in poverty
+  rename(poppoverty = estimate) #renamed this variable to avoid confusion
+
+fortable_pctpoverty<- left_join(studytowns_pctpoverty, fortable_pop, by = "GEOID")  %>% #add in the total pop variable
+    select(place.x, comm_type.x, state.x, GEOID, pop_1, poppoverty) %>%
+    rename(state = state.x,
+         place = place.x,
+         comm_type = comm_type.x) %>%
+  mutate(pctpoverty_6 = (poppoverty/pop_1)*100) %>% #calculate % of pop that is in poverty
+  distinct(place, .keep_all = TRUE) 
+
+```
+
+### 7. Working Age Pop.
+```{r}
+#Percent of working age population
+#Population over 16
+studytowns_popover16 <- studytowns_agesex %>%
+  filter(variable == "S0101_C01_025") %>% #filter for pop over 16
+  rename(popover16 = estimate) #renamed variable to avoid confusion
+
+##################################################################################
+#Population over 65
+#studytowns_popover65 <- studytowns_agesex %>%
+  #filter(variable == "S0101_C01_030") %>% #filter for just population over 65 (labor force)
+  #rename(popover65 = estimate) #renamed variable to avoid confusion
+
+#Combining df then calculating pop btwn 16-64 and percentgae of working age pop
+#studytowns_workingpop <- left_join(studytowns_popover16, studytowns_popover65, by = "GEOID")%>%
+  #select(place.x, comm_type.x, state.x, BLS_match.x, GEOID, popover16, popover65) %>%
+  #rename(state = state.x,
+         #place = place.x,
+         #comm_type = comm_type.x,
+        # BLS_match = BLS_match.x) %>%
+ # mutate(workingpop = popover16 - popover65) %>% #subtracting pop over 65 from pop over 16 to calculate pop between 16-64
+  #distinct(place, .keep_all = TRUE) 
+##################################################################################
+
+#METHOD CHANGE 04.22.24: 16+ population as opposed to 16-64
+studytowns_workingpop <- studytowns_popover16 %>%
+  select(place, comm_type, state, BLS_match, GEOID, popover16) %>%
+  mutate(workingpop = popover16) %>%
+  select(-popover16)%>%
+  distinct(place, .keep_all = TRUE) 
+
+```
+
+#BLS
+##Import Data
+```{r}
+#MA Towns
+#import
+BLS_MA_path <-"BLS_LAUS_2013-2023/MA Towns.xlsx"
+BLS_MA <- read_excel(BLS_MA_path)
+
+#clean
+BLS_MA <- left_join(BLS_MA, study_comm, by = c("place" = "BLS_match"))%>%
+  filter(year >= 2017 & year <= 2021) %>%
+  select(place.y, year, period, comm_type, muni, state, GEOID, NewGeoID, ES202_match, `labor force`, employment, unemployment, `unemployment rate`)%>%
+  rename(place = place.y)
+
+
+#Study Comm
+#import
+BLS_path <-"J:/EPPR/SEIGMA/Secondary Data/Census Data/Kassie/censusdata/BLS_LAUS_2013-2023/study comm/"
+BLS_workbooks <- list.files(BLS_path)
+BLSworkbook_names <-stringr::str_remove(BLS_workbooks, ".xlsx")
+
+process1 <- lapply(paste(BLS_path, BLS_workbooks, sep = ""), read_excel)
+names(process1) <- BLSworkbook_names
+
+BLS <- bind_rows(process1) 
+
+#clean
+BLS <- BLS %>%
+  mutate(Place = rep(BLSworkbook_names, each = nrow(BLS) / length(BLSworkbook_names)))%>%
+  filter(Year >= 2017 & Year <= 2021) %>%
+  rename(place = Place,
+         year = Year,
+         period = Period)
+
+BLS <- left_join(BLS, study_comm, by = "place") %>%
+  filter(state != "MA")
+
+BLS_all <- full_join(BLS, BLS_MA, by = "place") %>%
+    mutate(
+      year = coalesce(year.y, year.x),
+      period = coalesce(period.y, period.x),
+      `labor force` = coalesce(`labor force.y`, `labor force.x`),
+      employment = coalesce(employment.y, employment.x),
+      unemployment = coalesce(unemployment.y, unemployment.x),
+      `unemployment rate` = coalesce(`unemployment rate.y`, `unemployment rate.x`),
+      comm_type = coalesce(comm_type.y, comm_type.x),
+      muni = coalesce(muni.y, muni.x),
+      state = coalesce(state.y, state.x),
+      GEOID = coalesce(GEOID.y, GEOID.x),
+      NewGeoID = coalesce(NewGeoID.y, NewGeoID.x),
+      ES202_match = coalesce(ES202_match.y, ES202_match.x),
+      # Add more variables as needed
+      .keep = "unused"
+    )
+    
+
+```
+
+
+##Clean Data
+
+
+###8. Labor Force Count
+```{r}
+#average labor force by town across 5 yr period
+#studytowns_LF <- BLS_all %>%
+  #group_by(place, year) %>%
+  #summarize(lf_total = mean(`labor force`, na.rm = TRUE)) %>%
+  #ungroup()%>%
+  #select(place, lf_total) %>%
+  #distinct(place, .keep_all = TRUE)
+
+########################################################################################
+#METHOD CHANGE 04.22.24: average by year first, then by place
+
+#average labor force for each year, for each place (months -> years)
+studytowns_LF <- BLS_all %>%
+  group_by(place, year) %>%
+  summarize(lf_total = mean(`labor force`, na.rm = TRUE)) 
+
+#average labor force for each place (years -> single point average)
+studytowns_LF <- studytowns_LF %>%
+  group_by(place) %>%
+  summarize(lf_total = mean(lf_total, na.rm = TRUE))%>%
+  ungroup()%>%
+  select(place, lf_total) %>%
+  distinct(place, .keep_all = TRUE)
+
+
+```
+
+
+###8.2. Labor Force Participation Rate
+7 and 8
+```{r}
+#LFPR = total labor force/working age population
+
+fortable_lfpr <- left_join(studytowns_workingpop, studytowns_LF, by = "place") %>%
+  mutate(lfpr_8.2 = (lf_total/workingpop)*100) %>%
+  select(place, comm_type, state, GEOID, lf_total, workingpop, lfpr_8.2) %>%
+  distinct(place, .keep_all = TRUE)
+
+#fortable_lfpr <- left_join(fortable_lfpr, MAtowns_LF, by = "place") %>%
+  #mutate(lf_total = ifelse(is.na(lf_total.y), lf_total.x, lf_total.y)) %>%
+
+
+```
+
+
+###9. Unemployment Rate
+```{r}
+#average unemp. rate by town across 5 year period
+
+#fortable_unemp <- BLS_all %>% 
+ # group_by(place, comm_type, state, GEOID) %>%
+ # summarize(avgunemp_9 = mean(`unemployment rate`, na.rm = TRUE),
+  #          .groups = "drop")%>%
+ # distinct(place, .keep_all = TRUE)
+
+########################################################################################
+#METHOD CHANGE 04.22.24: create rate and average by year first, then by place
+
+#average unemployment for each year, for each place (months -> years)
+studytowns_UI <- BLS_all %>%
+  group_by(place, year) %>%
+  summarize(ui_total = mean(unemployment, na.rm = TRUE)) 
+
+#average labor force for each place (years -> single point average)
+studytowns_UI <- studytowns_UI %>%
+  group_by(place) %>%
+  summarize(ui_total = mean(ui_total, na.rm = TRUE))%>%
+  ungroup()%>%
+  select(place, ui_total, lf_total) %>%
+  distinct(place, .keep_all = TRUE)
+
+#divide total unemployed by working pop
+fortable_unemp <- left_join(studytowns_UI, studytowns_LF, by = "place") %>%
+  mutate(avgunemp_9 = (ui_total/lf_total)*100) %>%
+  select(place, ui_total, lf_total, avgunemp_9) %>%
+  distinct(place, .keep_all = TRUE)
+
+
+```
+
+
+#ES-202
+##Import Data
+```{r}
+ES202_path <-"J:/EPPR/SEIGMA/Secondary Data/Census Data/Kassie/censusdata/ES202_All Muni_2017-2021/"
+ES202_workbooks <- list.files(ES202_path)
+workbook_names <-stringr::str_remove(ES202_workbooks, ".xlsx")
+
+process1 <- lapply(paste(ES202_path, ES202_workbooks, sep = ""), read_excel)
+names(process1) <- workbook_names
+
+ES202 <- bind_rows(process1)
+
+```
+
+##Clean Data
+
+```{r}
+ES202 <- left_join(ES202, study_comm, by = c("areaname" = "ES202_match"))%>%
+  filter(naicstitle == "Total, All Industries" | naicstitle == "Manufacturing")%>%
+  filter(lvl != "2")
+
+```
+
+
+###10. Percent of WF Employed in Manufacturing
+For MA Towns
+```{r}
+MAtowns_manuf <- ES202 %>%
+  select(periodyear, place, naicstitle, avgemp) %>%
+  pivot_wider(
+    names_from = naicstitle,
+    values_from = avgemp,
+    names_prefix = "emp_",
+    values_fill = 0
+  ) %>%
+  rename(total = "emp_Total, All Industries",
+         manuf = "emp_Manufacturing",
+         year = "periodyear") %>%
+  group_by(place) %>%
+  summarize(manuf_avg = mean(manuf),
+            total_avg = mean(total))%>%
+  group_by(place)%>%
+  summarize(pctmanuf_10 = (manuf_avg / total_avg) * 100) %>%
+  select(place, pctmanuf_10)
+
+
+missing_data <- data.frame(
+  place = c("Middlefield, MA", "Monroe, MA", "Mount Washington, MA"),
+  pctmanuf_10 = rep(NA, 3)
+ )
+
+MAtowns_manuf <- rbind(MAtowns_manuf, missing_data) %>%
+  distinct(place, .keep_all = TRUE)
+
+```
+
+###11. Average Annual Job Growth Rate
+For MA Towns
+```{r}
+MAtowns_jobgrowth <- ES202 %>%
+  select(periodyear, place, naicstitle, avgemp) %>%
+  pivot_wider(
+    names_from = naicstitle,
+    values_from = avgemp,
+    names_prefix = "emp_",
+    values_fill = 0
+  ) %>%
+  rename(total = "emp_Total, All Industries",
+         year = "periodyear")%>%
+  select(-emp_Manufacturing)%>%
+  arrange(place, year) %>%
+  group_by(place) %>%
+  mutate(percent_change = ((total - lag(total)) / abs(lag(total))) * 100) %>% #(new value - old value)/|old value|
+  ungroup()
+
+MAtowns_jobgrowth <- MAtowns_jobgrowth %>%
+  filter(year != 2017) %>%
+  select(place, percent_change) %>%
+  group_by(place)%>%
+  summarize(avgjobgrowth_11 = mean(percent_change))%>%
+  ungroup()
+
+missing_data2 <- data.frame(
+  place = c("Middlefield, MA", "Monroe, MA", "Mount Washington, MA"),
+  avgjobgrowth_11 = rep(NA, 3)
+ )
+
+MAtowns_jobgrowth <- rbind(MAtowns_jobgrowth, missing_data2)%>%
+  distinct(place, .keep_all = TRUE)
+
+```
+
+
+
+#LODES
+##Import Data
+```{r}
+LODES_path <- "OnTheMap_StudyComm_2017-2021/AllTowns_OntheMapWORK_2017_2021.xlsx"
+LODES <- read_excel(LODES_path)
+
+```
+
+##Clean Data
+
+###10.2. Percent of WF Employed in Manufacturing
+For other study comm
+```{r}
+studytowns_manuf <- LODES %>%
+  pivot_wider(
+    names_from = Measure,
+    values_from = Count,
+    names_prefix = "emp_",
+    values_fill = 0
+  ) %>%
+  rename(totalAll = "emp_TotalJobs",
+         manuf = "emp_ManufacturingJobs",
+         place = Place)%>%
+  group_by(place)%>%
+  summarize(manuf_sum = sum(manuf),
+            totalAll_sum = sum(totalAll))%>%
+  group_by(place)%>%
+  mutate(pctmanuf_10 = (manuf_sum/totalAll_sum)*100) %>%
+  select(place, pctmanuf_10)%>%
+  ungroup()
+
+studytowns_manuf <- left_join(studytowns_manuf, study_comm, by = "place")%>%
+  distinct(place, .keep_all = TRUE)
+
+```
+
+
+```{r}
+#combine with ES202 data for full dataset
+fortable_manuf <- full_join(studytowns_manuf, MAtowns_manuf, by = "place")%>%
+    mutate(pctmanuf_10 = coalesce(pctmanuf_10.y, pctmanuf_10.x),
+      # Add more variables as needed
+      .keep = "unused"
+    )%>%
+  select(place, comm_type, state, GEOID, pctmanuf_10)%>%
+  distinct(place, .keep_all = TRUE)
+```
+
+###11.2. Average Annual Job Growth Rate
+For other study comm
+```{r}
+studytowns_jobgrowth <- LODES %>%
+  pivot_wider(
+    names_from = Measure,
+    values_from = Count,
+    names_prefix = "emp_",
+    values_fill = 0
+  ) %>%
+  rename(totalAll = "emp_TotalJobs",
+         manuf = "emp_ManufacturingJobs",
+         place = Place,
+         year = Year)%>%
+  select(-manuf) %>%
+  arrange(place, year) %>%
+    group_by(place) %>%
+    mutate(percent_change = ((totalAll - lag(totalAll)) / abs(lag(totalAll))) * 100) %>% #(new value - old value)/|old value|
+    ungroup() 
+
+studytowns_jobgrowth <- studytowns_jobgrowth %>%
+  filter(year != 2017) %>%
+  select(place, percent_change) %>%
+  group_by(place)%>%
+  summarize(avgjobgrowth_11 = mean(percent_change))%>%
+  ungroup()
+
+studytowns_jobgrowth <- left_join(studytowns_jobgrowth, study_comm, by = "place")%>%
+  distinct(place, .keep_all = TRUE)
+```
+
+```{r}
+#combine with ES202 data for full dataset
+fortable_jobgrowth <- full_join(studytowns_jobgrowth, MAtowns_jobgrowth, by = "place") %>%
+    mutate(avgjobgrowth_11 = coalesce(avgjobgrowth_11.y, avgjobgrowth_11.x),
+      # Add more variables as needed
+      .keep = "unused"
+    )%>%
+  select(place, comm_type, state, GEOID, avgjobgrowth_11)%>%
+  distinct(place, .keep_all = TRUE)
+```
+
+
+#Merge
+
+Start by creating a df that contains all variables for all communities. (done)
+Then create a subset for each casino's host and match communities. (done)
+Then create an avg for the match comm for each casino. (done)
+Then create an average of each variable for all MA communities. (done) 
+
+```{r}
+fortable_dataframes <- ls(pattern = "^fortable_") #Identify data frames with the "fortable_" convention
+fortable_list <- lapply(fortable_dataframes, get) #Create a list of data frames using lapply
+
+#Print the structure and column names of each data frame in fortable_list
+lapply(fortable_list, function(df) {
+  cat("Data frame structure:\n")
+  print(class(df))
+  cat("Column names:\n")
+  print(names(df))
+  cat("\n")
+})
+
+left_join_by_place <- function(df1, df2) {
+  left_join(df1, df2, by = "place")
+}
+
+fortable_merged <- reduce(fortable_list, left_join_by_place) %>%
+  select(place, comm_type.y, state.y, GEOID.y, pop_1.y, pctbs_2, medianHHinc_3, pctblack_4, pcthispanic_5, pctpoverty_6, lfpr_8.2, avgunemp_9, pctmanuf_10, avgjobgrowth_11) %>%
+  rename(comm_type = comm_type.y,
+         state = state.y,
+         GEOID = GEOID.y,
+         pop_1 = pop_1.y) %>%
+  mutate(
+    comm_type = case_when(
+      place == "Encore, MA" ~ "EBH_host",
+      place == "Springfield, MA" ~ "MGM_host",
+      place == "Plainville, MA" ~ "PPC_host",
+      # Add more conditions as needed
+      TRUE ~ comm_type  #Keep the original value if no condition is met
+    )
+  )
+
+```
+
+
+```{r}
+#create a subset for each casino's host and match communities
+MGM <- fortable_merged %>%
+  filter(str_detect(comm_type, "^MGM")) %>%
+  mutate(pcthostpop = pop_1 / first(pop_1[comm_type == "MGM_host"]),
+         pcthostmedHHinc = medianHHinc_3 / first(medianHHinc_3[comm_type == "MGM_host"]))
+
+fortable_MGM <-  MGM%>%
+  filter(comm_type != "MGM_alt",
+         comm_type != "MGM_old") %>%
+  bind_rows(
+    fortable_merged %>%
+      filter(comm_type == "MGM") %>%
+      summarise(across(where(is.numeric), ~mean(., na.rm = TRUE))) %>%
+      mutate(place = "Average Match Community", comm_type = "MGM")
+  )
+
+
+PPC <- fortable_merged %>%
+  filter(str_detect(comm_type, "^PPC")) %>%
+  mutate(pcthostpop = pop_1 / first(pop_1[comm_type == "PPC_host"]),
+         pcthostmedHHinc = medianHHinc_3 / first(medianHHinc_3[comm_type == "PPC_host"]))
+
+fortable_PPC <-  PPC%>%
+  filter(comm_type != "PPC_alt",
+         comm_type != "PPC_old") %>%
+  bind_rows(
+    fortable_merged %>%
+      filter(comm_type == "PPC") %>%
+      summarise(across(where(is.numeric), ~mean(., na.rm = TRUE))) %>%
+      mutate(place = "Average Match Community", comm_type = "PPC")
+  )
+
+
+EBH <- fortable_merged %>%
+  filter(str_detect(comm_type, "^EBH")) %>%
+  mutate(pcthostpop = pop_1 / first(pop_1[comm_type == "EBH_host"]),
+         pcthostmedHHinc = medianHHinc_3 / first(medianHHinc_3[comm_type == "EBH_host"]))
+
+fortable_EBH <-  EBH%>%
+  filter(comm_type != "EBH_alt",
+         comm_type != "EBH_old") %>%
+  bind_rows(
+    fortable_merged %>%
+      filter(comm_type == "EBH") %>%
+      summarise(across(where(is.numeric), ~mean(., na.rm = TRUE))) %>%
+      mutate(place = "Average Match Community", comm_type = "EBH")
+  )
+
+fortable_MAavg <- fortable_merged %>%
+  filter(comm_type %in% c("MA_avg", "EBH_host", "MGM_host", "PPC_host")) %>%
+  summarise(across(where(is.numeric), ~mean(., na.rm = TRUE))) %>%
+  mutate(place = "Average Massachusetts Community", comm_type = "Average")
+
+```
+
+```{r}
+
+fortable <- bind_rows(fortable_EBH, fortable_MGM, fortable_PPC, fortable_MAavg)
+
+```
+
+# Export
+
+```{r}
+
+write.xlsx(fortable, "fortable_20240422.xlsx", rowNames = FALSE)
+
+
+```
+
+```{r}
+#create a subset for each casino's host and match communities
+
+fortable_MGMalt <-  MGM %>%
+  filter(comm_type != "MGM",
+         comm_type != "MGM_host") 
+
+fortable_PPCalt <-  PPC%>%
+  filter(comm_type != "PPC",
+         comm_type != "PPC_host") 
+
+fortable_EBHalt <-  EBH%>%
+  filter(comm_type != "EBH",
+         comm_type != "EBH_host") 
+
+fortable_alt <- bind_rows(fortable_EBHalt, fortable_MGMalt, fortable_PPCalt)
+
+
+```
+
+```{r}
+write.xlsx(fortable_alt, "fortable_alt_20240422.xlsx", rowNames = FALSE)
+```
+

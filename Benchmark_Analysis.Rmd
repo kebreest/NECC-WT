@@ -12,19 +12,234 @@ knitr::opts_chunk$set(echo = TRUE)
 #Read in Packages
 
 ```{r}
-
+library(tidyverse)
+library(readxl)
+library(writexl)
+library(purrr)
+library(janitor)
+library(flextable)
+library(officer)
+library(lubridate)
+library(openxlsx)
+library(rio)
+library(dplyr)
+library(haven)
+library(tidycensus)
 ```
 
-#Import Data
+#ACS
+##Pull data 
+Need town level data for ACS 5YR 2018-2022, 9 states (ME, NH, VT, MA, CT, RI, NY, PA, NJ)
 
-##ACS
+ACS variables to pull: 
+- population: TOTAL POPULATION = B01003 
+- median household income: HOUSEHOLD INCOME IN THE PAST 12 MONTHS (IN 2021 INFLATION-ADJUSTED DOLLARS) = B19013 
+- educational distribution: EDUCATIONAL ATTAINMENT = S1501 
+- racial distribution: RACE = B02001 
+- ethnic distribution?: HISPANIC OR LATINO ORIGIN = B03003 
+- age distribution: AGE AND SEX = S0101
+
+##Setting up variables and geographies
 
 ```{r}
-
+towns <- "County Subdivision"
+years <- c(2022, 2021)
+outputs <- "tidy"
+states <- 25
+tables <- c("B01003", "B19013", "S1501", "B02001", "B03003", "S0101")
 ```
+, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012)
 
-##BLS
+#Study Towns
 ```{r}
+study_comm <- read_excel("StudyCommunities.xlsx")
+
+study_comm <- study_comm %>%
+  rename(GEOID = GeoID)
 
 ```
 
+
+```{r}
+years <- c(2022:2012)
+
+studytowns_pop <- map_df(years, function(y) {
+  get_acs(
+    geography = "place", 
+    state = states,
+    table = "B01003",
+    year = y,
+    geometry = FALSE,
+    output = outputs,
+    cache_table = TRUE
+  ) %>%
+    mutate(year = y)
+})
+
+
+```
+
+
+#ACS
+
+```{r}
+#TOTAL POPULATION
+studytowns_pop <- map_df(years, function(y) {
+  get_acs(
+    geography = towns, 
+    state = states,
+    table = "B01003",
+    year = y,
+    geometry = FALSE,
+    output = outputs,
+    cache_table = TRUE
+  ) %>%
+    mutate(year = y)
+}) 
+
+studytowns_pop <- studytowns_pop %>%
+  mutate(GEOID = as.numeric(GEOID))
+
+studytowns_pop <- left_join(study_comm, studytowns_pop, by = "GEOID")
+
+#Population
+fortable_pop <- studytowns_pop %>%
+  group_by(year) %>%
+  rename(pop = estimate) %>% #renamed this variable to avoid confusion
+  select(year, place, state, GEOID, pop) %>% #select only the necessary variables for the table
+  distinct(place, .keep_all = TRUE) 
+
+#HOUSEHOLD INCOME
+studytowns_HHinc <- map_df(years, function(y) {
+  get_acs(
+    geography = towns, 
+    state = states,
+    table = "B19013",
+    year = y,
+    geometry = FALSE,
+    output = outputs,
+    cache_table = TRUE
+  ) %>%
+    mutate(year = y)
+}) 
+
+studytowns_HHinc <- studytowns_HHinc %>%
+  mutate(GEOID = as.numeric(GEOID))
+
+studytowns_HHinc <- left_join(study_comm, studytowns_HHinc, by = "GEOID")
+
+#Median Household Income 
+fortable_medianHHinc <- studytowns_HHinc %>%
+  #filter(variable == "B19013_001") %>%  #filter for overall median household income
+  group_by(year) %>%
+  rename(medianHHinc = estimate) %>% #renamed this variable to avoid confusion
+  select(year, place, state, GEOID, medianHHinc) %>% #select only the necessary variables for the table
+  distinct(place, .keep_all = TRUE) 
+```
+
+
+```{r}
+#EDUCATIONAL ATTAINMENT
+studytowns_edu <- map_df(years, function(y) {
+  get_acs(                                                                                                             
+    geography = towns, 
+    state = states,
+    table = "S1501",
+    year = y,
+    geometry = FALSE,
+    output = outputs,
+    cache_table = TRUE
+  ) %>%
+    mutate(year = y)
+}) 
+
+studytowns_edu <- studytowns_edu %>%
+  mutate(GEOID = as.numeric(GEOID))
+
+studytowns_edu <- left_join(study_comm, studytowns_edu, by = "GEOID")
+
+fortable_edu <- studytowns_edu %>%
+  
+  group_by(year) %>%
+  rename(educated = estimate) %>% #renamed this variable to avoid confusion
+  select(year, place, state, GEOID, educated) %>% #select only the necessary variables for the table
+  distinct(place, .keep_all = TRUE) 
+
+#RACE
+studytowns_race <- map_df(years, function(y) {
+  get_acs(
+    geography = towns, 
+    state = states,
+    table = "B02001",
+    year = y,
+    geometry = FALSE,
+    output = outputs,
+    cache_table = TRUE
+  ) %>%
+    mutate(year = y)
+}) 
+
+studytowns_race <- studytowns_race %>%
+  mutate(GEOID = as.numeric(GEOID))
+
+studytowns_race <- left_join(study_comm, studytowns_race, by = "GEOID")
+
+fortable_race <- studytowns_race %>%
+
+  group_by(year) %>%
+  rename(raceamount = estimate) %>% #renamed this variable to avoid confusion
+  select(year, place, state, GEOID, raceamount) %>% #select only the necessary variables for the table
+  distinct(place, .keep_all = TRUE) 
+
+#HISPANIC OR LATINO ORIGIN
+studytowns_hispanic <- map_df(years, function(y) {
+  get_acs(
+    geography = towns, 
+    state = states,
+    table = "B03003",
+    year = y,
+    geometry = FALSE,
+    output = outputs,
+    cache_table = TRUE
+  ) %>%
+    mutate(year = y)
+}) 
+
+studytowns_hispanic <- studytowns_hispanic %>%
+  mutate(GEOID = as.numeric(GEOID))
+
+studytowns_hispanic <- left_join(study_comm, studytowns_hispanic, by = "GEOID")
+
+fortable_hispanic <- studytowns_hispanic %>%
+ 
+  group_by(year) %>%
+  rename(hispanic = estimate) %>% #renamed this variable to avoid confusion
+  select(year, place, state, GEOID, hispanic) %>% #select only the necessary variables for the table
+  distinct(place, .keep_all = TRUE) 
+
+#AGE AND SEX
+studytowns_agesex <- map_df(years, function(y) {
+  get_acs(
+    geography = towns, 
+    state = states,
+    table = "S0101",
+    year = y,
+    geometry = FALSE,
+    output = outputs,
+    cache_table = TRUE
+  ) %>%
+    mutate(year = y)
+}) 
+
+studytowns_agesex <- studytowns_agesex %>%
+  mutate(GEOID = as.numeric(GEOID))
+
+studytowns_agesex <- left_join(study_comm, studytowns_agesex, by = "GEOID")
+
+fortable_agesex <- studytowns_agesex %>%
+  
+  group_by(year) %>%
+  rename(agesex = estimate) %>% #renamed this variable to avoid confusion
+  select(year, place, state, GEOID, agesex) %>% #select only the necessary variables for the table
+  distinct(place, .keep_all = TRUE) 
+```
