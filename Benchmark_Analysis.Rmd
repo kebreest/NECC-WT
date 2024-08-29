@@ -27,9 +27,8 @@ library(haven)
 library(tidycensus)
 ```
 
-#ACS
-##Pull data 
-Need town level data for ACS 5YR 2018-2022, 9 states (ME, NH, VT, MA, CT, RI, NY, PA, NJ)
+#TidyCensus Set Up
+Need town level data for ACS 5YR 2018-2022 in MA, Essex County, and the 9 Municipalities in the study
 
 ACS variables to pull: 
 - population: TOTAL POPULATION = B01003 
@@ -43,14 +42,15 @@ ACS variables to pull:
 
 ```{r}
 towns <- "County Subdivision"
-years <- c(2022, 2021)
+counties <- "County"
+years <- c(2022:2012)
 outputs <- "tidy"
 states <- 25
 tables <- c("B01003", "B19013", "S1501", "B02001", "B03003", "S0101")
 ```
-, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012)
 
-#Study Towns
+
+##Study Towns
 ```{r}
 study_comm <- read_excel("StudyCommunities.xlsx")
 
@@ -59,29 +59,18 @@ study_comm <- study_comm %>%
 
 ```
 
+## Investigate the data to plan for cleaning
 
 ```{r}
-years <- c(2022:2012)
+varnames_subject <- load_variables(2018, "acs5/subject") #looking for 2017-2021 variables
+View(varnames_subject)
 
-studytowns_pop <- map_df(years, function(y) {
-  get_acs(
-    geography = "place", 
-    state = states,
-    table = "B01003",
-    year = y,
-    geometry = FALSE,
-    output = outputs,
-    cache_table = TRUE
-  ) %>%
-    mutate(year = y)
-})
-
-
+varnames_detailed <- load_variables(2018, "acs5")
+View(varnames_detailed)
 ```
 
-
 #ACS
-
+##Total Population
 ```{r}
 #TOTAL POPULATION
 studytowns_pop <- map_df(years, function(y) {
@@ -106,9 +95,13 @@ studytowns_pop <- left_join(study_comm, studytowns_pop, by = "GEOID")
 fortable_pop <- studytowns_pop %>%
   group_by(year) %>%
   rename(pop = estimate) %>% #renamed this variable to avoid confusion
-  select(year, place, state, GEOID, pop) %>% #select only the necessary variables for the table
+  select(year, place, state, GEOID, ES202_match, pop) %>% #select only the necessary variables for the table
   distinct(place, .keep_all = TRUE) 
 
+```
+
+##Median Household Income
+```{r}
 #HOUSEHOLD INCOME
 studytowns_HHinc <- map_df(years, function(y) {
   get_acs(
@@ -130,18 +123,17 @@ studytowns_HHinc <- left_join(study_comm, studytowns_HHinc, by = "GEOID")
 
 #Median Household Income 
 fortable_medianHHinc <- studytowns_HHinc %>%
-  #filter(variable == "B19013_001") %>%  #filter for overall median household income
   group_by(year) %>%
   rename(medianHHinc = estimate) %>% #renamed this variable to avoid confusion
-  select(year, place, state, GEOID, medianHHinc) %>% #select only the necessary variables for the table
+  select(year, place, state, GEOID, ES202_match, medianHHinc) %>% #select only the necessary variables for the table
   distinct(place, .keep_all = TRUE) 
 ```
 
-
+##Educational Distribution
 ```{r}
 #EDUCATIONAL ATTAINMENT
 studytowns_edu <- map_df(years, function(y) {
-  get_acs(                                                                                                             
+  get_acs(                                                                                                
     geography = towns, 
     state = states,
     table = "S1501",
@@ -154,17 +146,26 @@ studytowns_edu <- map_df(years, function(y) {
 }) 
 
 studytowns_edu <- studytowns_edu %>%
-  mutate(GEOID = as.numeric(GEOID))
+  mutate(GEOID = as.numeric(GEOID)) #fix GEOID for merge
 
-studytowns_edu <- left_join(study_comm, studytowns_edu, by = "GEOID")
+edu_vars <- read_excel("EduAttain_S1501_SelectedVars.xlsx") #read in file of selected variables
 
-fortable_edu <- studytowns_edu %>%
-  
-  group_by(year) %>%
-  rename(educated = estimate) %>% #renamed this variable to avoid confusion
-  select(year, place, state, GEOID, educated) %>% #select only the necessary variables for the table
-  distinct(place, .keep_all = TRUE) 
+studytowns_edu_joined <- studytowns_edu %>%
+  inner_join(edu_vars, by = "variable") #inner join to select only the values of the variable "variable" that we want (drops obs)
 
+studytowns_edu_joined <- left_join(study_comm, studytowns_edu_joined, by = "GEOID") #left join to select only the values of the variable GEOID that are in our study
+
+fortable_edu <- studytowns_edu_joined %>%
+  pivot_wider(
+    id_cols = c(GEOID, NAME, year, place, muni, state, ES202_match, BLS_match), 
+    names_from = variable_name, 
+    values_from = estimate
+  ) #pivot wider so that there is one variable for each value of the variable "variable", named using names specified in edu_vars
+
+```
+
+##Race
+```{r}
 #RACE
 studytowns_race <- map_df(years, function(y) {
   get_acs(
@@ -182,15 +183,24 @@ studytowns_race <- map_df(years, function(y) {
 studytowns_race <- studytowns_race %>%
   mutate(GEOID = as.numeric(GEOID))
 
-studytowns_race <- left_join(study_comm, studytowns_race, by = "GEOID")
+race_vars <- read_excel("Race_B02001_SelectedVars.xlsx") #read in file of selected variables
 
-fortable_race <- studytowns_race %>%
+studytowns_race_joined <- studytowns_race %>%
+  inner_join(race_vars, by = "variable") #inner join to select only the values of the variable "variable" that we want (drops obs)
 
-  group_by(year) %>%
-  rename(raceamount = estimate) %>% #renamed this variable to avoid confusion
-  select(year, place, state, GEOID, raceamount) %>% #select only the necessary variables for the table
-  distinct(place, .keep_all = TRUE) 
+studytowns_race_joined <- left_join(study_comm, studytowns_race_joined, by = "GEOID") #left join to select only the values of the variable GEOID that are in our study
 
+fortable_race <- studytowns_race_joined %>%
+  pivot_wider(
+    id_cols = c(GEOID, NAME, year, place, muni, state, ES202_match, BLS_match), 
+    names_from = variable_name, 
+    values_from = estimate
+  ) #pivot wider so that there is one variable for each value of the variable "variable", named using names specified in race_vars
+
+```
+
+##Ethnicity
+```{r}
 #HISPANIC OR LATINO ORIGIN
 studytowns_hispanic <- map_df(years, function(y) {
   get_acs(
@@ -208,15 +218,24 @@ studytowns_hispanic <- map_df(years, function(y) {
 studytowns_hispanic <- studytowns_hispanic %>%
   mutate(GEOID = as.numeric(GEOID))
 
-studytowns_hispanic <- left_join(study_comm, studytowns_hispanic, by = "GEOID")
+hispanic_vars <- read_excel("Hispanic_B03003_SelectedVars.xlsx") #read in file of selected variables
 
-fortable_hispanic <- studytowns_hispanic %>%
- 
-  group_by(year) %>%
-  rename(hispanic = estimate) %>% #renamed this variable to avoid confusion
-  select(year, place, state, GEOID, hispanic) %>% #select only the necessary variables for the table
-  distinct(place, .keep_all = TRUE) 
+studytowns_hispanic_joined <- studytowns_hispanic %>%
+  inner_join(hispanic_vars, by = "variable") #inner join to select only the values of the variable "variable" that we want (drops obs)
 
+studytowns_hispanic_joined <- left_join(study_comm, studytowns_hispanic_joined, by = "GEOID") #left join to select only the values of the variable GEOID that are in our study
+
+fortable_hispanic <- studytowns_hispanic_joined %>%
+  pivot_wider(
+    id_cols = c(GEOID, NAME, year, place, muni, state, ES202_match, BLS_match), 
+    names_from = variable_name, 
+    values_from = estimate
+  ) #pivot wider so that there is one variable for each value of the variable "variable", named using names specified in race_vars
+
+```
+
+##Age 
+```{r}
 #AGE AND SEX
 studytowns_agesex <- map_df(years, function(y) {
   get_acs(
@@ -234,12 +253,90 @@ studytowns_agesex <- map_df(years, function(y) {
 studytowns_agesex <- studytowns_agesex %>%
   mutate(GEOID = as.numeric(GEOID))
 
-studytowns_agesex <- left_join(study_comm, studytowns_agesex, by = "GEOID")
+age_vars <- read_excel("Age_S0101_SelectedVars.xlsx") #read in file of selected variables
 
-fortable_agesex <- studytowns_agesex %>%
-  
-  group_by(year) %>%
-  rename(agesex = estimate) %>% #renamed this variable to avoid confusion
-  select(year, place, state, GEOID, agesex) %>% #select only the necessary variables for the table
-  distinct(place, .keep_all = TRUE) 
+studytowns_age_joined <- studytowns_agesex %>%
+  inner_join(age_vars, by = "variable") #inner join to select only the values of the variable "variable" that we want (drops obs)
+
+studytowns_age_joined <- left_join(study_comm, studytowns_age_joined, by = "GEOID") #left join to select only the values of the variable GEOID that are in our study
+
+fortable_age <- studytowns_age_joined %>%
+  pivot_wider(
+    id_cols = c(GEOID, NAME, year, place, muni, state, ES202_match, BLS_match), 
+    names_from = variable_name, 
+    values_from = estimate
+  ) #pivot wider so that there is one variable for each value of the variable "variable", named using names specified in race_vars
+
+fortable_age_2017_2022 <- fortable_age %>%
+  filter(year > 2016) %>%
+  mutate(
+    pct_under_5 = (total_under_5 / total) * 100,
+    pct_5_to_9 = (total_5_to_9 / total) * 100,
+    pct_10_to_14 = (total_10_to_14 / total) * 100,
+    pct_15_to_19 = (total_15_to_19 / total) * 100,
+    pct_20_to_24 = (total_20_to_24 / total) * 100,
+    pct_25_to_29 = (total_25_to_29 / total) * 100,
+    pct_30_to_34 = (total_30_to_34 / total) * 100,
+    pct_35_to_39 = (total_35_to_39 / total) * 100,
+    pct_40_to_44 = (total_40_to_44 / total) * 100,
+    pct_45_to_49 = (total_45_to_49 / total) * 100,
+    pct_50_to_54 = (total_50_to_54 / total) * 100,
+    pct_55_to_59 = (total_55_to_59 / total) * 100,
+    pct_60_to_64 = (total_60_to_64 / total) * 100,
+    pct_65_to_69 = (total_65_to_69 / total) * 100,
+    pct_70_to_74 = (total_70_to_74 / total) * 100,
+    pct_75_to_79 = (total_75_to_79 / total) * 100,
+    pct_80_to_84 = (total_80_to_84 / total) * 100,
+    pct_85_over = (total_85_over / total) * 100,
+    pct_selected_5_to_14 = (selected_5_to_14 / total) * 100,
+    pct_selected_15_to_17 = (selected_15_to_17 / total) * 100,
+    pct_selected_under_18 = (selected_under_18 / total) * 100,
+    pct_selected_18_to_24 = (selected_18_to_24 / total) * 100,
+    pct_selected_15_to_44 = (selected_15_to_44 / total) * 100
+  )
+
+fortable_age_2012_2016 <- fortable_age %>%
+  filter(year < 2016) %>%
+  rename_with(
+    .fn = ~ gsub("^total_", "pct_", .),  # Rename 'total_' to 'pct_'
+    .cols = starts_with("total_")
+  ) %>%
+  rename_with(
+    .fn = ~ paste0("pct_", .),  # Add 'pct_' as prefix to 'selected_' columns
+    .cols = starts_with("selected_")
+  )%>%
+  mutate(
+    total_under_5 = (pct_under_5 / 100) * total,
+    total_5_to_9 = (pct_5_to_9 / 100) * total,
+    total_10_to_14 = (pct_10_to_14 / 100) * total,
+    total_15_to_19 = (pct_15_to_19 / 100) * total,
+    total_20_to_24 = (pct_20_to_24 / 100) * total,
+    total_25_to_29 = (pct_25_to_29 / 100) * total,
+    total_30_to_34 = (pct_30_to_34 / 100) * total,
+    total_35_to_39 = (pct_35_to_39 / 100) * total,
+    total_40_to_44 = (pct_40_to_44 / 100) * total,
+    total_45_to_49 = (pct_45_to_49 / 100) * total,
+    total_50_to_54 = (pct_50_to_54 / 100) * total,
+    total_55_to_59 = (pct_55_to_59 / 100) * total,
+    total_60_to_64 = (pct_60_to_64 / 100) * total,
+    total_65_to_69 = (pct_65_to_69 / 100) * total,
+    total_70_to_74 = (pct_70_to_74 / 100) * total,
+    total_75_to_79 = (pct_75_to_79 / 100) * total,
+    total_80_to_84 = (pct_80_to_84 / 100) * total,
+    total_85_over = (pct_85_over / 100) * total,
+    selected_5_to_14 = (pct_selected_5_to_14 / 100) * total,
+    selected_15_to_17 = (pct_selected_15_to_17 / 100) * total,
+    selected_under_18 = (pct_selected_under_18 / 100) * total,
+    selected_18_to_24 = (pct_selected_18_to_24 / 100) * total,
+    selected_15_to_44 = (pct_selected_15_to_44 / 100) * total
+  )
+
+fortable_age_2012_2016 <- fortable_age_2012_2016[names(fortable_age_2017_2022)]
+fortable_age_2017_2022 <- fortable_age_2017_2022[names(fortable_age_2012_2016)]
+
+fortable_age <- rbind(fortable_age_2012_2016, fortable_age_2017_2022)
 ```
+
+
+#Figures
+
